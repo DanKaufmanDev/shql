@@ -1,0 +1,25 @@
+name: Google Sheets integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+        env:
+          SHQL_SCHEMA: examples/database.shql
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          CUSTOMERS_TAB_ID: ${{ secrets.CUSTOMERS_TAB_ID }}
+          ORDERS_TAB_ID: ${{ secrets.ORDERS_TAB_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

@@ -1,0 +1,19 @@
+SHEET ${GOOGLE_SHEETS_ID}
+
+TABLE customers FROM #{CUSTOMERS_TAB_ID} {
+  _shql_id: id
+  _shql_version: number
+  name: text
+  email: text
+  status: text
+  created_at: datetime
+}
+
+TABLE orders FROM #{ORDERS_TAB_ID} {
+  _shql_id: id
+  _shql_version: number
+  customer_id: text
+  total: number
+  status: text
+  created_at: datetime
+}

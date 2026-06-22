@@ -1,0 +1,35 @@
+CONNECTION operations FROM GOOGLE-SHEETS ${OPERATIONS_SHEET_ID}
+CONNECTION exports FROM JSON "./data/exports.json"
+
+TABLE customers FROM operations.#{CUSTOMERS_TAB_ID} {
+  _shql_id: id
+  _shql_version: number
+  email: text UNIQUE MATCHES EMAIL
+  name: text
+  status: text IN ["active", "inactive", "pending"] DEFAULT "active"
+  spend: number >= 0 DEFAULT 0
+  created_at: datetime DEFAULT NOW()
+}
+
+TABLE orders FROM operations.#{ORDERS_TAB_ID} {
+  _shql_id: id
+  _shql_version: number
+  customer_id: text
+  total: number >= 0
+  status: text IN ["draft", "paid", "refunded"]
+  created_at: datetime DEFAULT NOW()
+}
+
+TABLE customer_export FROM exports.#customers {
+  _shql_id: id
+  _shql_version: number
+  email: text UNIQUE MATCHES EMAIL
+  name: text
+  segment: text
+}
+
+VIEW active_customers AS {
+  FROM customers
+  WHERE status = "active"
+  SELECT _shql_id, email, name, spend
+}

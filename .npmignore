@@ -1,0 +1,29 @@
+# Source and development files are not part of the published runtime.
+src/
+test/
+examples/
+.github/
+.agents/
+.codex/
+
+# Local configuration and tooling.
+.env
+.env.*
+!.env.example
+.gitignore
+.prettierignore
+.prettierrc.json
+eslint.config.js
+tsconfig.json
+
+# Generated or machine-local artifacts.
+node_modules/
+coverage/
+*.log
+*.tgz
+.DS_Store
+
+# Package-manager and editor metadata.
+package-lock.json
+.vscode/
+.idea/

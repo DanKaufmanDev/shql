@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SHQL",
+  "scopeName": "source.shql",
+  "fileTypes": ["shql"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#variables" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "comments": { "patterns": [{ "name": "comment.line.double-slash.shql", "match": "//.*$" }] },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.shql",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.shql", "match": "\\\\." }]
+        },
+        { "name": "string.quoted.single.shql", "begin": "'", "end": "'" }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.environment.shql",
+          "match": "\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|#\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+        }
+      ]
+    },
+    "numbers": { "patterns": [{ "name": "constant.numeric.shql", "match": "\\b-?\\d+(?:\\.\\d+)?\\b" }] },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.shql",
+          "match": "(?i)\\b(FROM|LET|WHERE|GROUP|BY|SELECT|SORT|TAKE|INSERT|INTO|UPDATE|DELETE|UPSERT|KEY|VALUE|RETURNING|JOIN|LEFT|ON|AS|CASE|WHEN|THEN|ELSE|END|TABLE|SHEET|CONNECTION|VIEW|DEFAULT|UNIQUE|IN|MATCHES|AND|OR|NOT|IS|NULL|ASC|DESC)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "storage.type.shql", "match": "(?i)\\b(id|text|number|boolean|date|datetime)\\??\\b" }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "support.function.shql",
+          "match": "(?i)\\b(NOW|UPPER|LOWER|LEN|TEXT|NUMBER|DATE|DATETIME|COALESCE|CONTAINS|STARTS_WITH|ENDS_WITH|COUNT|SUM|AVG|MIN|MAX)(?=\\s*\\()"
+        }
+      ]
+    }
+  }
+}

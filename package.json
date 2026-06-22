@@ -1,0 +1,99 @@
+{
+  "name": "shql",
+  "version": "1.0.0-rc.1",
+  "description": "A data operations language for querying, validating, transforming and syncing company data.",
+  "author": {
+    "name": "DanKaufmanDev",
+    "url": "https://github.com/DanKaufmanDev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanKaufmanDev/shql.git"
+  },
+  "homepage": "https://github.com/DanKaufmanDev/shql#readme",
+  "bugs": {
+    "url": "https://github.com/DanKaufmanDev/shql/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./memory": {
+      "types": "./dist/adapters/memory.d.ts",
+      "import": "./dist/adapters/memory.js"
+    },
+    "./google-sheets": {
+      "types": "./dist/adapters/google-sheets.d.ts",
+      "import": "./dist/adapters/google-sheets.js"
+    },
+    "./json": {
+      "types": "./dist/adapters/json.d.ts",
+      "import": "./dist/adapters/json.js"
+    },
+    "./csv": {
+      "types": "./dist/adapters/csv.d.ts",
+      "import": "./dist/adapters/csv.js"
+    },
+    "./http": {
+      "types": "./dist/adapters/http.d.ts",
+      "import": "./dist/adapters/http.js"
+    },
+    "./sql": {
+      "types": "./dist/adapters/sql.d.ts",
+      "import": "./dist/adapters/sql.js"
+    }
+  },
+  "bin": {
+    "shql": "./dist/cli.js",
+    "shql-lsp": "./dist/language-server.js"
+  },
+  "files": [
+    "dist",
+    "syntaxes",
+    "DOCS.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "test:integration": "node --test --experimental-strip-types test/*.integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "ci": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
+    "check": "npm run build && node dist/cli.js --help",
+    "prepack": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "google-sheets",
+    "database",
+    "query-language",
+    "data-operations",
+    "etl",
+    "data-quality"
+  ],
+  "license": "MIT",
+  "packageManager": "npm@11.9.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.9.3",
+    "eslint": "^10.5.0",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  }
+}
