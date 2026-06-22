@@ -93,7 +93,8 @@
   "license": "MIT",
   "packageManager": "npm@11.9.0",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
