@@ -44,11 +44,17 @@ export function explainQuery(source: string | Query, schema: DatabaseSchema): Qu
   if (query.operation === "select") {
     if (query.groupBy.length)
       steps.push({ operation: "group", detail: `Group by ${query.groupBy.length} expression(s).` });
-    steps.push({ operation: "project", detail: `Produce ${query.select.length} projection(s).` });
+    if (query.having) steps.push({ operation: "having", detail: "Filter groups by the HAVING condition." });
+    steps.push({
+      operation: "project",
+      detail: `Produce ${query.distinct ? "distinct " : ""}${query.select.length} projection(s).`,
+    });
     if (query.sort.length) {
       steps.push({ operation: "sort", detail: `Sort by ${query.sort.length} expression(s) in memory.` });
       warnings.push("SORT materializes all matching rows before TAKE is applied.");
     }
+    if (query.skip !== undefined)
+      steps.push({ operation: "skip", detail: `Skip the first ${query.skip} row(s).` });
     if (query.take !== undefined)
       steps.push({ operation: "take", detail: `Return at most ${query.take} row(s).` });
   } else {

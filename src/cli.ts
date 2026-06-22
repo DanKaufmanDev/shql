@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { connect } from "./database.ts";
+import { loadSchema } from "./schema.ts";
 import { ShqlError } from "./errors.ts";
 import type { GoogleSheetsAuth } from "./types.ts";
 import { writeTypes } from "./codegen.ts";
@@ -129,8 +130,12 @@ async function main(): Promise<void> {
   }
   const positional = cleanArguments(args);
   const command = positional[0];
-  const schema = option(args, "--schema") ?? "database.shql";
-  const db = await connect({ schema, auth: authFromEnvironment() });
+  const schemaPath = option(args, "--schema") ?? "database.shql";
+  const schema = await loadSchema(schemaPath);
+  const needsGoogleAuth = [...schema.connections.values()].some(
+    (connection) => connection.provider === "google-sheets",
+  );
+  const db = await connect({ schema, auth: needsGoogleAuth ? authFromEnvironment() : undefined });
   let output: unknown;
 
   if (command === "tables") output = db.tables();

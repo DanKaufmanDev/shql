@@ -38,9 +38,12 @@ export function parseSchema(
   let connectionMatch: RegExpExecArray | null;
   while ((connectionMatch = connectionPattern.exec(input))) {
     const [, name, rawProvider, rawSource] = connectionMatch;
-    const provider = rawProvider.toLowerCase() as ConnectionProvider;
+    const lowered = rawProvider.toLowerCase();
+    const provider = (lowered === "xlsx" ? "excel" : lowered) as ConnectionProvider;
     invariant(
-      ["google-sheets", "memory", "json", "csv", "http", "postgres", "mysql", "sqlite"].includes(provider),
+      ["google-sheets", "memory", "json", "csv", "excel", "http", "postgres", "mysql", "sqlite"].includes(
+        provider,
+      ),
       "SCHEMA_ERROR",
       `Unknown connection provider ${rawProvider}.`,
     );

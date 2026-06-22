@@ -1,98 +1,110 @@
 # SHQL documentation
 
-SHQL means **Sheets Query Language**. It presents a Google spreadsheet as a small database:
+SHQL (**Sheets Query Language**) is a tabular data language. It gives a small, readable query and mutation language to data that lives in spreadsheets, files, APIs, and databases, behind a single typed schema.
 
-- A spreadsheet is a database.
-- Each tab is a table.
-- Row 1 contains column names.
-- Rows 2 onward contain records.
-- A `.shql` schema binds stable SHQL names to Google spreadsheet and tab IDs.
+The data model is uniform across every source:
+
+- A workbook, spreadsheet, file, or endpoint is a **database**.
+- Each worksheet, tab, file, or resource is a **table**.
+- The first row holds **column names**; the remaining rows are **records**.
+- A `.shql` schema binds stable SHQL names to physical sources and defines column types.
 - Queries execute as a top-to-bottom data pipeline.
 
-This repository contains the production-oriented v1 candidate. It is a data operations language for Sheets, files, APIs, and databases. The published package has no runtime dependencies and targets Node.js 20.11 or newer. TypeScript is compiled to standard ESM JavaScript with declaration files and source maps.
+Google Sheets is the first-class, human-facing source, but it is one connector among several. The published package (`@shql/core`) has **no runtime dependencies** and targets Node.js 20.11 or newer. TypeScript is compiled to standard ESM with declaration files and source maps.
 
 ## Status and scope
 
 Implemented:
 
-- Typed and compact schema declarations
-- Environment-variable substitution
-- `FROM`, `LET`, `WHERE`, `GROUP BY`, `SELECT`, `SORT`, and `TAKE`
-- Object-style `INSERT` and `UPDATE`
-- Guarded `DELETE`
-- Named parameters
-- Scalar functions and aggregate functions
-- Google service-account and access-token authentication
-- Google Sheets and in-memory adapters
-- Node API and CLI
-- Structured errors and mutation safety checks
-- Batch inserts and key-based upserts
-- Managed `_shql_version` values and stale-write detection
+- Typed and compact schema declarations with environment-variable substitution
+- Named connections across Google Sheets, Excel, CSV, JSON, HTTP, SQL, and in-memory sources
+- Reads: `FROM`, `JOIN` / `LEFT JOIN`, `LET`, `WHERE`, `GROUP BY`, `SELECT` (with `DISTINCT`), `HAVING`, `SORT`, `TAKE`, `SKIP` / `OFFSET`
+- Expressions: arithmetic, comparison, logical, `IN` / `NOT IN`, `IS NULL`, string concatenation (`||`), `CASE`, scalar and aggregate functions
+- Writes: object-style `INSERT` (single and batch), `UPDATE`, guarded `DELETE`, key-based `UPSERT`, all with `RETURNING`
+- Reusable read-only `VIEW` declarations
+- Named parameters that are never parsed as source
+- Managed `_shql_version` optimistic concurrency and stale-write detection
 - `validate`, `inspect`, `init`, and `doctor` operations
-- Retry handling for rate limits and transient Google failures
-- Compiled Node distribution, linting, formatting, CI, and npm release automation
+- Platform APIs: `transform` / `materialize` / `sync`, query plans, jobs, an HTTP server, governance and audit, migrations and backups, and TypeScript codegen
+- Google service-account, OAuth-refresh, and access-token authentication; retry handling for rate limits and transient failures
 
-Not yet fully implemented:
+Not yet implemented:
 
-- Transactions
-- Formula-aware values
-- Full schema migrations or automatic tab creation
+- Multi-statement transactions
+- Subqueries and set operations (`UNION`)
+- Formula preservation
+- Pushdown / streaming execution (whole tables are read into memory)
 
-SHQL is intended for internal tools, prototypes, operational workflows, lightweight content stores, and modest datasets. It is not a replacement for a transactional database.
+SHQL is intended for internal tools, operational workflows, lightweight data pipelines, reporting, and modest datasets. It is not a replacement for a transactional database.
 
 ## Requirements
 
-- Node.js 20.11 or newer
-- A Google Cloud project with the Google Sheets API enabled
-- A Google service account or an OAuth access token
-- A spreadsheet shared with the authenticated identity
+- Node.js 20.11 or newer.
+- For **Google Sheets** connections only: a Google Cloud project with the Sheets API enabled, a service account or OAuth/access token, and a spreadsheet shared with the authenticated identity.
+- File (`CSV`, `JSON`, `EXCEL`), `HTTP`, in-memory, and bring-your-own `SQL` connections need no Google credentials.
 
-## Installing from npm
-
-Install SHQL in a Node project:
+## Installation
 
 ```bash
-npm install shql
+npm install @shql/core
 ```
 
-Or install the CLI globally:
-
 ```bash
-npm install --global shql
+npm install --global @shql/core
 shql --help
 ```
 
-## Spreadsheet preparation
+SHQL is an ESM package with TypeScript declarations:
 
-Create a tab with headers in its first row. For a typed table, the physical headers must have the same names and order as the schema:
-
-| \_shql_id | \_shql_version | name | email           | status | created_at               |
-| --------- | -------------: | ---- | --------------- | ------ | ------------------------ |
-| 89cf...   |              1 | Ada  | ada@example.com | active | 2026-01-05T14:00:00.000Z |
-
-Use a dedicated `id` column such as `_shql_id`. SHQL generates a UUID when inserting a record whose `id` value is omitted. Existing rows must be assigned unique IDs by the application or spreadsheet owner.
-
-For tables that can be mutated, declare `_shql_version: number`. New records begin at version `1`, and each SHQL update increments the version. Applications cannot assign this field directly.
-
-The spreadsheet ID is the value between `/d/` and `/edit` in a Google Sheets URL. The numeric tab ID is the `gid` query parameter:
-
-```text
-https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit#gid=TAB_ID
+```ts
+import { connect } from "@shql/core";
 ```
 
-IDs locate Google resources but are not authentication secrets.
+## Data model
+
+For positional sources (Google Sheets, Excel, CSV) the first physical row is the header row and must match the schema's column names and order for typed writes. For JSON the record keys are the columns. For HTTP and SQL the adapter maps records to the schema.
+
+Use a dedicated `id` column such as `_shql_id`. SHQL generates a UUID when inserting a record whose `id` is omitted; existing rows must already have unique IDs.
+
+For mutable tables, declare `_shql_version: number`. New records begin at version `1`, and each SHQL update increments it. Applications cannot assign this field directly; it powers optimistic concurrency.
 
 ## Schema files
 
-The default schema filename used by the CLI is `database.shql`.
+A schema declares connections and tables. The default schema filename used by the CLI is `database.shql`. Comments use `//`.
 
-### Typed declarations
+### Sources
+
+A single default Google Sheets source:
+
+```shql
+SHEET ${GOOGLE_SHEETS_ID}
+```
+
+Or named connections, which make storage explicit and allow cross-source queries:
+
+```shql
+CONNECTION operations FROM GOOGLE-SHEETS ${OPERATIONS_SHEET_ID}
+CONNECTION exports    FROM JSON  "./data/exports.json"
+CONNECTION imports    FROM CSV   "./data/imports"
+CONNECTION catalog    FROM EXCEL "./data/catalog.xlsx"
+CONNECTION crm        FROM HTTP  ${CRM_API_URL}
+```
+
+| Provider                      | Source value                          | Read | Write |
+| ----------------------------- | ------------------------------------- | :--: | :---: |
+| `GOOGLE-SHEETS`               | Spreadsheet ID                        |  ✓   |   ✓   |
+| `EXCEL` (alias `XLSX`)        | Path to a `.xlsx` workbook            |  ✓   |   ✓   |
+| `CSV`                         | A `.csv` file or a directory of them  |  ✓   |   ✓   |
+| `JSON`                        | A `.json` file or a directory of them |  ✓   |   ✓   |
+| `HTTP`                        | Base URL of a JSON endpoint           |  ✓   |   ✓   |
+| `MEMORY`                      | (none; in-process)                    |  ✓   |   ✓   |
+| `POSTGRES`, `MYSQL`, `SQLITE` | Handled by a supplied `SqlAdapter`    |  ✓   |   ✓   |
+
+### Typed tables
 
 Typed declarations are required for writes:
 
 ```shql
-SHEET ${GOOGLE_SHEETS_ID}
-
 TABLE customers FROM #{CUSTOMERS_TAB_ID} {
   _shql_id: id
   _shql_version: number
@@ -104,23 +116,18 @@ TABLE customers FROM #{CUSTOMERS_TAB_ID} {
 }
 ```
 
-`${GOOGLE_SHEETS_ID}` and `#{CUSTOMERS_TAB_ID}` resolve from environment variables. Literal IDs are also accepted:
+The name after `TABLE` is the stable SHQL name. The value after `#` is the physical locator within the connection — a numeric `gid` for Google Sheets, a worksheet name for Excel, or a file/resource key. A leading `connection.` prefix selects a named connection:
 
 ```shql
-SHEET 1AbCdEf
-
-TABLE customers FROM #123456789 {
-  _shql_id: id
-  _shql_version: number
-  name: text
-}
+TABLE titles FROM catalog.#Sheet1 { ... }
+TABLE orders FROM operations.#{ORDERS_TAB_ID} { ... }
 ```
 
-The name after `TABLE` is the stable SHQL table name. Renaming the physical Google tab does not break the schema because the numeric tab ID remains stable.
+Renaming a physical Google tab does not break the schema because the numeric tab ID is stable. Environment references resolve when the schema is loaded; literal IDs also work (`SHEET 1AbCdEf`, `FROM #123456789`).
 
-### Compact declarations
+### Compact tables
 
-Compact declarations infer all headers as nullable text and are read-only:
+Compact declarations infer all headers as nullable text and are read-only — useful for exploration:
 
 ```shql
 [${GOOGLE_SHEETS_ID}]
@@ -128,65 +135,167 @@ Compact declarations infer all headers as nullable text and are read-only:
 [#{ORDERS_TAB_ID} AS orders]
 ```
 
-This form is useful for exploration. Convert a compact table to a typed declaration before inserting, updating, or deleting data.
+Convert a compact table to a typed declaration before inserting, updating, or deleting.
 
-### Types
+### Views
+
+A view is a reusable, read-only named query in the schema:
+
+```shql
+VIEW active_customers AS {
+  FROM customers
+  WHERE status = "active"
+  SELECT _shql_id, name, email
+}
+```
+
+Query a view like any table: `FROM active_customers SELECT name`.
+
+### Column types
 
 | Type       | Runtime value | Meaning                                                  |
 | ---------- | ------------- | -------------------------------------------------------- |
 | `id`       | `string`      | Stable record identity; generated on insert when omitted |
 | `text`     | `string`      | Text value                                               |
-| `number`   | `number`      | Finite JavaScript number                                 |
+| `number`   | `number`      | Finite number                                            |
 | `boolean`  | `boolean`     | `true` or `false`                                        |
 | `date`     | `Date`        | Date value                                               |
 | `datetime` | `Date`        | Date and time value                                      |
 
-Append `?` to make a field nullable:
+Append `?` to make a field nullable (`score: number?`). Blank cells read as `null`; inserts and updates reject `null` for non-nullable columns. A table may declare at most one `id` column.
+
+### Constraints and defaults
+
+Constraints follow the type on a column declaration:
 
 ```shql
-score: number?
+TABLE customers FROM #{CUSTOMERS_TAB_ID} {
+  _shql_id: id
+  _shql_version: number
+  email: text UNIQUE MATCHES EMAIL
+  status: text IN ["active", "inactive", "trial"] DEFAULT "active"
+  score: number? >= 0 <= 100
+  region: text MATCHES /^[A-Z]{2}$/
+  created_at: datetime DEFAULT NOW()
+}
 ```
 
-Blank cells are represented as `null`. Non-nullable blank cells are accepted during reads so existing untidy sheets can be inspected, but inserts and updates validate declared nullability.
+| Constraint        | Effect                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `UNIQUE`          | Rejects duplicate non-null values within the table                                      |
+| `IN [ ... ]`      | Restricts to an allowed set (a JSON array of values)                                    |
+| `>= n` / `<= n`   | Inclusive numeric minimum / maximum                                                     |
+| `MATCHES /re/`    | Text must match the regular expression                                                  |
+| `MATCHES EMAIL`   | Shorthand for an email pattern                                                          |
+| `DEFAULT <value>` | Applied on insert when omitted: `NOW()`, a string, a number, `TRUE`, `FALSE`, or `NULL` |
 
-Schema validation rejects unknown types, duplicate tables, duplicate columns, missing environment variables, and tables with more than one `id` column.
+Schema validation rejects unknown types, duplicate tables or columns, missing environment variables, unknown providers, and more than one `id` column.
+
+## Connections and adapters
+
+Each connection resolves to a `TableAdapter`. Built-in adapters require no configuration beyond the connection source, except Google Sheets (authentication) and SQL (a client).
+
+### Google Sheets
+
+The default for `SHEET` and `GOOGLE-SHEETS` connections. Requires authentication (see below). Reads request unformatted values, writes use `USER_ENTERED`, datetimes are written as ISO 8601, and transient `429`/`5xx` responses are retried with backoff.
+
+### Excel workbooks
+
+`EXCEL` (alias `XLSX`) connections read and write `.xlsx` files directly. A workbook is one connection and each worksheet is a table, addressed by its sheet name — the same model as Google Sheets:
+
+```shql
+CONNECTION catalog FROM EXCEL "./data/catalog.xlsx"
+
+TABLE titles FROM catalog.#Sheet1 {
+  _shql_id: id
+  _shql_version: number
+  title: text
+  price: number
+}
+```
+
+```ts
+const db = await connect({ schema: parseSchema(schemaText) });
+await db.initialize(); // creates the workbook and worksheets if absent
+await db.query(`INSERT INTO titles { title: "SHQL", price: 0 }`);
+```
+
+Notes and limits:
+
+- No third-party dependency — the OOXML package is read and written with Node's built-in `zlib`.
+- Sheet names used as `tabId` must not contain spaces.
+- On mutation, the target worksheet is rewritten (inline strings, ISO-8601 dates). Other worksheets and shared strings are preserved, but cell formatting, formulas, and charts on the rewritten sheet are not.
+- Externally produced workbooks that store dates as serial numbers are decoded to dates when the column type is `date` or `datetime`.
+- ZIP64 workbooks (more than 65,535 parts) are not supported.
+
+### CSV and JSON
+
+`CSV` and `JSON` connections accept either a single file or a directory; in a directory, each table's `tabId` selects the file (`<tabId>.csv` / `<tabId>.json`). A JSON file may be an array (single table) or an object keyed by table. Writes are atomic (write-to-temp then rename).
+
+### HTTP
+
+`HTTP` connections read from and write to a JSON endpoint under a base URL. Supply per-connection `headers` and a custom `fetch` through `connect` options.
+
+### SQL
+
+`SqlAdapter` is a portable client contract for PostgreSQL, MySQL, and SQLite. It does not bundle a driver; provide a `SqlClient` (an object exposing `query(sql, params)`), so SHQL adds no database dependency:
+
+```ts
+import { connect, SqlAdapter } from "@shql/core";
+
+const adapter = new SqlAdapter(client /* { query(sql, params) } */);
+const db = await connect({ schema, connections: { warehouse: { adapter } } });
+```
+
+### In-memory
+
+`MemoryAdapter` holds rows in process — ideal for tests and local logic with no credentials:
+
+```ts
+import { connect, MemoryAdapter, parseSchema } from "@shql/core";
+
+const adapter = new MemoryAdapter({
+  customers: [{ _shql_id: "c1", _shql_version: 1, name: "Ada" }],
+});
+const db = await connect({ schema: parseSchema(schemaText), adapter });
+```
+
+Custom adapters implement `read`, `append`, `update`, and `delete` from `TableAdapter` (with optional `inspect`, `initialize`, and `doctor`).
 
 ## Authentication
 
+Authentication is only required for Google Sheets connections.
+
 ### Service account
 
-Create a Google service account, enable the Sheets API, download its JSON credentials, and share the spreadsheet with the service account's `client_email`.
-
-The CLI accepts the full credentials document:
+Create a service account, enable the Sheets API, download its JSON credentials, and share the spreadsheet with its `client_email`. The CLI accepts the full document or separate values:
 
 ```bash
 export GOOGLE_SERVICE_ACCOUNT_JSON='{"client_email":"...","private_key":"..."}'
-```
-
-It also accepts separate values:
-
-```bash
+# or
 export GOOGLE_CLIENT_EMAIL='service-account@example.iam.gserviceaccount.com'
 export GOOGLE_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n'
 ```
 
-Never commit service-account credentials or `.env` files. The repository ignores `.env` by default.
+### OAuth refresh token
+
+```bash
+export GOOGLE_OAUTH_CLIENT_ID='...'
+export GOOGLE_OAUTH_CLIENT_SECRET='...'
+export GOOGLE_OAUTH_REFRESH_TOKEN='...'
+```
 
 ### Access token
-
-For short-lived sessions:
 
 ```bash
 export GOOGLE_ACCESS_TOKEN='ya29...'
 ```
 
-The caller is responsible for refreshing an access token. The service-account adapter obtains and caches tokens automatically.
+The caller refreshes access tokens; the service-account and OAuth adapters obtain and cache tokens automatically. Never commit credentials or `.env` files.
 
-### Node API authentication
+### Node API
 
 ```ts
-import { connect } from "shql";
-
 const db = await connect({
   schema: "./database.shql",
   auth: {
@@ -197,26 +306,19 @@ const db = await connect({
 });
 ```
 
-An existing token can be supplied instead:
-
-```ts
-const db = await connect({
-  schema: "./database.shql",
-  auth: { type: "access-token", accessToken },
-});
-```
+`auth` accepts `{ type: "service-account", ... }`, `{ type: "oauth", ... }`, or `{ type: "access-token", accessToken }`. Per-connection authentication, headers, and `fetch` can be supplied through `connect`'s `connections` option.
 
 ## Query language
 
 Clauses execute in written order. The canonical select pipeline is:
 
 ```text
-FROM → LET → WHERE → GROUP BY → SELECT → SORT → TAKE
+FROM → JOIN → LET → WHERE → GROUP BY → SELECT [DISTINCT] → HAVING → SORT → TAKE / SKIP
 ```
 
-Keywords are case-insensitive. Identifiers are case-sensitive.
+Keywords are case-insensitive; identifiers are case-sensitive. A trailing semicolon is optional. Wrap an identifier that collides with a keyword in backticks (`` `select` ``).
 
-### Selecting rows
+### Selecting and projecting
 
 ```shql
 FROM customers
@@ -224,22 +326,52 @@ SELECT *
 ```
 
 ```shql
-FROM customers
-WHERE status = "active"
-SELECT name, email
-SORT name ASC
-TAKE 20
+FROM orders
+SELECT _shql_id, total * 1.13 AS total_with_tax
 ```
 
-`SORT` operates on projected output fields. Give computed projections an alias before sorting them.
+`SELECT DISTINCT` removes duplicate output rows:
 
-### Computed values
+```shql
+FROM customers
+SELECT DISTINCT region
+SORT region ASC
+```
 
-`LET` adds a value for subsequent clauses without changing the sheet:
+### Filtering
+
+```shql
+FROM customers
+WHERE status = "active" AND created_at >= $since
+SELECT name, email
+```
+
+Null checks use `IS NULL` / `IS NOT NULL`, which compose with `AND` / `OR`:
+
+```shql
+FROM customers
+WHERE score IS NULL AND status = "active"
+SELECT name
+```
+
+### Membership
+
+```shql
+FROM customers
+WHERE status IN ("active", "trial")
+SELECT name
+```
+
+`NOT IN` negates the test. An empty list (`IN ()`) matches nothing, and a `null` left-hand value never matches.
+
+### Computed fields with `LET`
+
+`LET` adds a value available to every later clause without changing the source. Bindings evaluate top to bottom:
 
 ```shql
 FROM orders
-LET total = price * quantity
+LET subtotal = price * quantity
+LET total = subtotal * 1.13
 WHERE total >= 100
 SELECT customer_id, total
 SORT total DESC
@@ -247,7 +379,7 @@ SORT total DESC
 
 ### Parameters
 
-Parameters begin with `$`:
+Parameters begin with `$` and are supplied separately. They are data, never parsed as SHQL, which prevents query injection. A missing parameter is a `VALIDATION_ERROR`.
 
 ```shql
 FROM customers
@@ -256,154 +388,193 @@ SELECT name, email
 ```
 
 ```ts
-const result = await db.query(query, { status: "active" });
+await db.query(query, { status: "active" });
 ```
 
-Missing parameters produce a `VALIDATION_ERROR`. Parameters are data and are never parsed as SHQL, preventing query injection through values.
+### Sorting and pagination
 
-### Expressions and operators
+```shql
+FROM customers
+SELECT name, created_at
+SORT created_at DESC, name ASC
+TAKE 50 SKIP 100
+```
 
-Supported operators, from lower to higher precedence:
+`SORT` operates on the projected output, so sort by a selected column (or its alias). `TAKE` limits the row count; `SKIP` (alias `OFFSET`) discards leading rows. They may appear in either order and apply after sorting (skip, then take).
 
-| Category   | Operators                                                       |
-| ---------- | --------------------------------------------------------------- |
-| Logical    | `OR`, `AND`, unary `NOT`                                        |
-| Comparison | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `IS NULL`, `IS NOT NULL` |
-| Arithmetic | `+`, `-`, `*`, `/`, unary `-`                                   |
+### Literals
 
-Comparisons involving `null` are false except `IS NULL` and `IS NOT NULL`. Division by zero and non-numeric arithmetic produce validation errors.
+```text
+"text"   'text'   42   3.14   TRUE   FALSE   NULL
+```
 
-Literals include quoted strings, finite numbers, `TRUE`, `FALSE`, and `NULL`.
+Strings accept single or double quotes and the escapes `\n` and `\t`.
+
+### Operators
+
+From lowest to highest precedence:
+
+| Category       | Operators                                                                       |
+| -------------- | ------------------------------------------------------------------------------- |
+| Logical        | `OR`, `AND`                                                                     |
+| Comparison     | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL` |
+| Additive       | `+`, `-`, `\|\|` (string concatenation)                                         |
+| Multiplicative | `*`, `/`                                                                        |
+| Unary          | `NOT`, `-`                                                                      |
+
+Null semantics: comparisons involving `null` are false except `IS NULL` / `IS NOT NULL`; `IN` with a `null` left side is false; arithmetic requires finite numbers (division by zero and non-numeric operands are rejected); `||` and `CONCAT` treat `null` as an empty string.
 
 ### Scalar functions
 
-| Function                    | Result                 |
-| --------------------------- | ---------------------- |
-| `NOW()`                     | Current datetime       |
-| `UPPER(value)`              | Uppercase text         |
-| `LOWER(value)`              | Lowercase text         |
-| `LEN(value)`                | Text length            |
-| `TEXT(value)`               | Text conversion        |
-| `NUMBER(value)`             | Number conversion      |
-| `DATE(value)`               | Date conversion        |
-| `DATETIME(value)`           | Datetime conversion    |
-| `COALESCE(a, b, ...)`       | First non-null value   |
-| `CONTAINS(text, part)`      | Boolean substring test |
-| `STARTS_WITH(text, prefix)` | Boolean prefix test    |
-| `ENDS_WITH(text, suffix)`   | Boolean suffix test    |
+| Function                                | Result                                 |
+| --------------------------------------- | -------------------------------------- |
+| `NOW()`                                 | Current datetime                       |
+| `UPPER(text)` / `LOWER(text)`           | Case conversion                        |
+| `LEN(text)`                             | Text length                            |
+| `TRIM(text)`                            | Trim leading/trailing whitespace       |
+| `REPLACE(text, search, with)`           | Replace all occurrences                |
+| `CONCAT(a, b, ...)`                     | Concatenate values (nulls become `""`) |
+| `CONTAINS(text, part)`                  | Substring test                         |
+| `STARTS_WITH(text, prefix)`             | Prefix test                            |
+| `ENDS_WITH(text, suffix)`               | Suffix test                            |
+| `ROUND(number [, digits])`              | Round to `digits` decimals (default 0) |
+| `ABS(number)`                           | Absolute value                         |
+| `COALESCE(a, b, ...)`                   | First non-null value                   |
+| `TEXT` / `NUMBER` / `DATE` / `DATETIME` | Type conversion                        |
 
-### Grouping and aggregation
+```shql
+FROM customers
+WHERE ENDS_WITH(email, "@example.com")
+SELECT UPPER(name) AS name, name || " <" || email || ">" AS contact
+```
+
+### Grouping, aggregation, and `HAVING`
 
 ```shql
 FROM orders
 WHERE status = "paid"
 GROUP BY customer_id
-SELECT
-  customer_id,
-  COUNT(*) AS orders,
-  SUM(total) AS revenue,
-  AVG(total) AS average_order
+SELECT customer_id, COUNT(*) AS orders, SUM(total) AS revenue
+HAVING SUM(total) >= 1000
 SORT revenue DESC
 ```
 
-Supported aggregate functions are `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. `COUNT(*)` counts all rows; `COUNT(field)` ignores nulls. Other aggregates also ignore null values.
+Aggregates are `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. `COUNT(*)` counts all rows; field aggregates ignore nulls. A non-aggregate projected field must appear in `GROUP BY`. `HAVING` filters groups and must use aggregate expressions; it requires `GROUP BY` or an aggregate `SELECT`. Omitting `GROUP BY` aggregates the whole filtered table into one group.
 
-An aggregate query without `GROUP BY` creates one group:
+### Joins
+
+Joins run in memory and can cross connections:
 
 ```shql
-FROM orders
-SELECT COUNT(*) AS orders, SUM(total) AS revenue
+FROM orders AS o
+JOIN customers AS c ON o.customer_id = c._shql_id
+SELECT o._shql_id AS order_id, c.name, o.total
 ```
 
-### Inserting records
+`LEFT JOIN` keeps unmatched left rows (right columns become `null`). Qualify columns with the table name or alias when names collide. Use `shql explain` to review join cost on large sources.
+
+### Conditional expressions
 
 ```shql
+FROM customers
+SELECT name, CASE
+  WHEN spend >= 1000 THEN "enterprise"
+  WHEN spend >= 250 THEN "growth"
+  ELSE "standard"
+END AS segment
+```
+
+### Writing data
+
+Mutations require a typed table; compact tables are read-only.
+
+```shql
+-- Insert (RETURNING is optional on every mutation)
 INSERT INTO customers {
-  name: $name,
-  email: $email,
-  status: "active",
-  created_at: NOW()
+  name: $name, email: $email, status: "active", created_at: NOW()
 }
-RETURNING _shql_id, name, created_at
-```
+RETURNING _shql_id, _shql_version, name
 
-The adapter appends a row. Omitted `id` fields receive a UUID. Other non-nullable columns are required. Unknown columns are rejected.
-
-Insert several records in one Google request:
-
-```shql
+-- Batch insert
 INSERT INTO customers [
   { name: "Ada", email: "ada@example.com", status: "active", created_at: NOW() },
   { name: "Lin", email: "lin@example.com", status: "active", created_at: NOW() }
 ]
-RETURNING _shql_id, name
-```
 
-### Upserting records
-
-`UPSERT` updates the unique matching record or appends a new record:
-
-```shql
+-- Upsert: update the unique match on KEY, else insert
 UPSERT INTO customers
 KEY email
-VALUE {
-  email: $email,
-  name: $name,
-  status: $status,
-  created_at: NOW()
-}
-RETURNING _shql_id, email
-```
+VALUE { email: $email, name: $name, status: $status, created_at: NOW() }
 
-The value object must include the key. More than one existing match produces `CONFLICT`. On the insertion path, all non-nullable fields are required.
-
-### Updating records
-
-```shql
-FROM customers
-WHERE _shql_id = $id
-UPDATE {
-  status: "inactive"
-}
+-- Update (WHERE required; id is immutable)
+FROM customers WHERE _shql_id = $id
+UPDATE { status: "inactive" }
 RETURNING _shql_id, status
-```
 
-`UPDATE` requires `WHERE`. The `id` column is immutable. SHQL rejects an update without a filter rather than risking an accidental whole-tab write.
-
-### Deleting records
-
-```shql
-FROM customers
-WHERE _shql_id = $id
+-- Delete (WHERE required)
+FROM customers WHERE _shql_id = $id
 DELETE
-RETURNING _shql_id
 ```
 
-`DELETE` requires `WHERE`. Google row deletion is executed from the highest row number downward so earlier deletions do not shift later targets.
+`INSERT` generates `_shql_id`, initializes `_shql_version`, applies defaults, and validates every field. `UPSERT`'s value object must include the key; more than one existing match is a `CONFLICT`. `UPDATE` and `DELETE` reject a missing `WHERE` to prevent accidental whole-table writes.
+
+### Grammar
+
+An informal grammar for the v1 syntax:
+
+```text
+statement := select | insert | update | delete | upsert
+
+select  := FROM table [AS alias]
+           [ [LEFT] JOIN table [AS alias] ON expression ]...
+           [LET name = expression]...
+           [WHERE expression]
+           [GROUP BY expression [, expression]...]
+           SELECT [DISTINCT] (* | projection [, projection]...)
+           [HAVING expression]
+           [SORT expression [ASC | DESC] [, ...]]
+           [TAKE integer] [SKIP integer]          // either order; OFFSET = SKIP
+
+insert  := INSERT INTO table (object | [ object [, object]... ])
+           [RETURNING projection-list]
+
+update  := FROM table [LET ...] WHERE expression
+           UPDATE object [RETURNING projection-list]
+
+delete  := FROM table [LET ...] WHERE expression
+           DELETE [RETURNING projection-list]
+
+upsert  := UPSERT INTO table KEY field VALUE object
+           [RETURNING projection-list]
+
+projection := (expression [AS name]) | *
+expression := literal | field | $param | (expression)
+            | NOT expression | - expression
+            | expression binary-op expression
+            | expression [NOT] IN ( [expression [, expression]...] )
+            | expression IS [NOT] NULL
+            | CASE (WHEN expression THEN expression)... [ELSE expression] END
+            | name ( [expression [, expression]...] )
+```
+
+Subqueries, set operations, and multi-system transactions are intentionally outside the current language.
 
 ## Node API
 
 ### `connect(options)`
 
-```ts
-const db = await connect({
-  schema: "./database.shql",
-  auth,
-  env: process.env,
-});
-```
+| Option        | Meaning                                                  |
+| ------------- | -------------------------------------------------------- |
+| `schema`      | Schema filepath or a parsed `DatabaseSchema`             |
+| `auth`        | Google authentication when no custom adapter is supplied |
+| `adapter`     | A single custom `TableAdapter` (e.g. `MemoryAdapter`)    |
+| `connections` | Per-connection `adapter` / `auth` / `headers` / `fetch`  |
+| `env`         | Values used to resolve schema variables                  |
+| `fetch`       | Fetch implementation for tests or controlled networking  |
+| `governance`  | A `Governance` policy                                    |
+| `context`     | The acting `{ actor, role }` for governance and audit    |
 
-Options:
-
-- `schema`: schema filepath or a parsed `DatabaseSchema`
-- `auth`: Google authentication when no custom adapter is supplied
-- `adapter`: custom implementation of `TableAdapter`
-- `env`: values used to resolve schema variables
-- `fetch`: optional Fetch API implementation, useful for tests or controlled networking
-
-### `db.query(source, parameters?)`
-
-Returns:
+### `db.query(source, parameters?)` and `db.execute(source, parameters?)`
 
 ```ts
 interface QueryResult {
@@ -414,153 +585,187 @@ interface QueryResult {
 }
 ```
 
-Dates are returned as JavaScript `Date` instances. JSON serialization turns them into ISO timestamps.
+Dates are returned as `Date` instances and serialize to ISO strings in JSON. `query` parses a string; `execute` accepts a string or a pre-parsed `Query`.
 
-### Metadata
+### `db.preview(source, parameters?)`
+
+Estimates the effect of a statement without writing. For mutations it returns the affected row count and warnings; for selects it runs the query.
+
+### `db.explain(source)`
+
+Returns a `QueryPlan` describing source reads, joins, filters, grouping, having, projection, sorting, skip/take, and cost warnings.
+
+### Metadata and diagnostics
 
 ```ts
 db.tables();
 db.describe("customers");
-await db.inspect();
-await db.validate();
-await db.initialize("customers");
-await db.doctor();
+await db.inspect(); // headers, row counts, inferred columns
+await db.validate(); // compare physical layout with the schema
+await db.initialize(); // write declared headers / create sheets where empty
+await db.doctor(); // verify connectivity for every connection
 ```
 
-### In-memory adapter
+## Platform operations
 
-Use the in-memory adapter for tests and local logic without Google credentials:
+### Transform, materialize, and sync
 
 ```ts
-import { connect, MemoryAdapter, parseSchema } from "shql";
+import { materialize, sync, transform } from "@shql/core";
 
-const schema = parseSchema(schemaText, {
-  GOOGLE_SHEETS_ID: "test",
-  CUSTOMERS_TAB_ID: "1",
-});
-
-const adapter = new MemoryAdapter({
-  customers: [
-    {
-      _shql_id: "customer-1",
-      _shql_version: 1,
-      name: "Ada",
-      email: "ada@example.com",
-      status: "active",
-      created_at: new Date(),
-    },
-  ],
-});
-
-const db = await connect({ schema, adapter });
-const result = await db.query("FROM customers SELECT *");
+const report = await transform(db, reportQuery); // run and return rows
+await materialize(db, reportQuery, "customer_revenue", { mode: "replace", dryRun: false });
+await sync(db, "crm_customers", "sheet_customers", "email");
 ```
 
-Custom adapters implement `read`, `append`, `update`, and `delete` from `TableAdapter`.
+Materialization modes are `append`, `replace`, and key-based `merge`; every materialization supports a dry run.
+
+### Jobs
+
+```ts
+import { JobRunner } from "@shql/core";
+
+const jobs = new JobRunner();
+jobs.register({
+  name: "refresh-revenue",
+  retries: 3,
+  run: async () => materialize(db, revenueQuery, "revenue", { mode: "replace" }),
+});
+await jobs.run("refresh-revenue");
+```
+
+Job history is persisted and retries use backoff.
+
+### HTTP server
+
+```ts
+import { createShqlServer, listen } from "@shql/core";
+
+const server = createShqlServer(db, {
+  token: process.env.SHQL_SERVER_TOKEN,
+  allowMutations: false,
+  allowedTables: ["customers", "orders"],
+});
+await listen(server, { port: 4545 });
+```
+
+Exposes health, schema, tables, query, and explain endpoints with bearer authentication, table allowlists, and mutation controls.
+
+### Governance and audit
+
+```ts
+import { Governance, JsonlAuditSink, connect } from "@shql/core";
+
+const governance = new Governance(
+  { analyst: [{ table: "customers", operations: ["select"], maskedColumns: ["email"] }] },
+  new JsonlAuditSink("./audit/shql.jsonl"),
+);
+
+const db = await connect({
+  schema: "./database.shql",
+  auth,
+  governance,
+  context: { actor: "analyst@example.com", role: "analyst" },
+});
+```
+
+Authorization is checked before execution, masked fields are redacted from results, and successful or failed operations emit audit events. `MemoryAuditSink` is available for tests.
+
+### Migrations, backups, and codegen
+
+```ts
+import { MigrationRunner, backupTable, restoreTable, generateTypes, writeTypes } from "@shql/core";
+
+const migrations = new MigrationRunner(db, [
+  { id: "001_init_customers", up: async (database) => database.initialize("customers") },
+]);
+await migrations.apply();
+
+await backupTable(db, "customers", "./backups/customers.json");
+await restoreTable(db, "customers", "./backups/customers.json");
+
+await writeTypes(db.schema, "src/shql.generated.d.ts");
+```
+
+Migration state is durable and ordered; generated interfaces reflect table names, field types, and nullability.
 
 ## CLI
 
 ```bash
-shql tables --schema database.shql
-shql describe customers --schema database.shql
-shql doctor --schema database.shql
-shql inspect customers --schema database.shql
-shql validate --schema database.shql
-shql init customers --schema database.shql
-shql query 'FROM customers SELECT * TAKE 10'
-shql query 'FROM customers WHERE status = $status SELECT *' \
-  --params '{"status":"active"}'
-shql query --file ./queries/active-customers.shql
+shql tables [--schema path]
+shql describe <table> [--schema path]
+shql validate [--schema path]          # exits 2 on an operational problem
+shql inspect [table] [--schema path]
+shql init [table] [--schema path]
+shql doctor [--schema path]
+shql explain <query>
+shql materialize <query> --into <table> [--mode append|replace|merge] [--key field] [--dry-run]
+shql generate types [--out path]
+shql backup <table> --out <path>
+shql restore <table> --file <path>
+shql serve [--port number]
+shql query <query> [--params JSON]
+shql query --file <path> [--params JSON]
 ```
 
-`init` writes a typed header row only when a tab is empty; it never overwrites a different existing header. `validate` exits with code `2` when it finds an operational problem. Add `--json` for compact JSON. Errors are printed to stderr and set a non-zero process exit code.
+`--schema` defaults to `database.shql`. Add `--json` for compact output and `--dry-run` to preview a mutation. Google authentication is only required when the schema uses a Google Sheets connection. Errors print to stderr and set a non-zero exit code.
+
+```bash
+shql query 'FROM customers WHERE status = $status SELECT *' --params '{"status":"active"}'
+SHQL_SERVER_TOKEN=secret shql serve --port 4545
+```
 
 ## Errors
 
-All expected runtime failures use `ShqlError`:
+All expected runtime failures use `ShqlError` with a stable `code`:
 
 | Code               | Meaning                                            |
 | ------------------ | -------------------------------------------------- |
 | `SCHEMA_ERROR`     | Invalid schema or missing schema environment value |
 | `QUERY_ERROR`      | Invalid query syntax                               |
 | `VALIDATION_ERROR` | Invalid field, type, parameter, or unsafe mutation |
-| `AUTH_ERROR`       | Google authentication failure                      |
-| `ADAPTER_ERROR`    | Google API, sheet layout, or adapter failure       |
+| `AUTH_ERROR`       | Authentication failure                             |
+| `ADAPTER_ERROR`    | Source API, layout, or adapter failure             |
 | `CONFLICT`         | Stale version, duplicate ID/key, or missing target |
 
 ```ts
+import { ShqlError } from "@shql/core";
+
 try {
   await db.query(query, parameters);
 } catch (error) {
-  if (error instanceof ShqlError) {
-    console.error(error.code, error.message, error.details);
-  }
+  if (error instanceof ShqlError) console.error(error.code, error.message, error.details);
 }
 ```
 
-## Mutation safety
+## Mutation safety and concurrency
 
-Before writing, the Google adapter verifies that the tab's complete header row exactly matches the typed schema in both name and order. This prevents an `UPDATE` from writing values into the wrong columns after a user rearranges a tab.
+- Typed writes require the physical header row to match the schema exactly in name and order.
+- Unknown columns and invalid values are rejected; `id` values are immutable and must be unique.
+- `UPDATE` and `DELETE` require `WHERE`; compact tables are read-only.
+- When `_shql_version: number` is declared, SHQL reads the current version before an update or delete, rejects a changed version with `CONFLICT`, and increments on success.
 
-`UPDATE` and `DELETE` require `WHERE`, and `id` values cannot be changed. Compact inferred tables are read-only.
-
-When `_shql_version: number` is declared, SHQL reads the current version before an update or delete, rejects a changed version with `CONFLICT`, and increments successful updates. Duplicate or missing stable IDs are rejected.
-
-Google Sheets does not offer an atomic compare-and-swap values operation. Version verification and writing are separate API requests, so there remains a small race window. These checks detect ordinary concurrent edits but do not make Sheets transactional. For critical or highly concurrent data, use a transactional database.
+Sources like Google Sheets offer no atomic compare-and-swap, so version verification and writing are separate requests and a small race window remains. These checks catch ordinary concurrent edits but do not make a spreadsheet transactional. For critical or highly concurrent data, use a transactional database.
 
 ## Performance model
 
-SHQL 0.1 reads a whole tab into memory, then filters, groups, sorts, and projects in Node. Google Sheets does not expose a general server-side query engine.
+SHQL reads a whole table into memory, then filters, groups, sorts, and projects in Node. Recommendations:
 
-Operational recommendations:
-
-- Keep tables modest; thousands to low tens of thousands of rows are the natural range.
-- Select only required output fields, though the adapter still fetches the tab.
-- Reuse a connected database so metadata and service-account tokens remain cached.
-- Avoid rapid polling and respect Google API quotas.
-- Transient `429`, `500`, `502`, `503`, and `504` responses are retried with exponential backoff and jitter.
-- Batch application operations where possible.
+- Keep tables modest — thousands to low tens of thousands of rows.
+- Reuse a connected database so metadata and tokens stay cached.
+- Avoid rapid polling; respect source API quotas. Transient Google `429`/`5xx` responses are retried with exponential backoff and jitter.
 - Do not expose unrestricted query endpoints to untrusted callers.
-
-The engine has no arbitrary code execution or dynamic function loading. Still, applications should control which schemas, credentials, and mutations a caller may access.
-
-## Google Sheets behavior
-
-- Reads request unformatted values and formatted dates.
-- Writes use `USER_ENTERED`, allowing Google to recognize dates and primitive values.
-- Datetimes are written as ISO 8601 strings.
-- Formulas are observed through their computed values; formula preservation is not part of 0.1.
-- Empty rows are omitted from query results.
-- Missing declared headers prevent reads. Extra or reordered headers may be read, but typed writes fail until the header row exactly matches the schema.
-- Deleting a record deletes its physical spreadsheet row.
 
 ## Development
 
-Run the tests:
-
 ```bash
-npm test
+npm install
+npm run ci          # typecheck, lint, format check, test, build
 ```
 
-Run the complete local CI suite:
+Individual checks: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, `npm run check`.
 
-```bash
-npm run ci
-```
-
-Individual checks:
-
-```bash
-npm run typecheck
-npm run lint
-npm run format:check
-npm run build
-npm run check
-```
-
-The test suite covers schema forms, parameters, pipeline evaluation, grouping, inserts, batch inserts, upserts, updates, deletes, generated IDs, version handling, duplicate IDs, operational inspection, and mutation guards. Network-free tests use `MemoryAdapter` or mocked HTTP responses.
-
-Run the optional live Google integration test with credentials and schema variables configured:
+Run the optional live Google integration test with credentials configured:
 
 ```bash
 SHQL_SCHEMA=examples/database.shql npm run test:integration
@@ -570,34 +775,23 @@ Project layout:
 
 ```text
 src/
-  adapters/
-    google-sheets.ts
-    memory.ts
-  cli.ts
-  database.ts
-  engine.ts
-  errors.ts
-  index.ts
-  query.ts
-  schema.ts
-  types.ts
+  adapters/   google-sheets.ts  xlsx.ts  csv.ts  json.ts  http.ts  sql.ts  memory.ts
+  cli.ts  database.ts  engine.ts  query.ts  schema.ts  planner.ts  pipeline.ts
+  governance.ts  jobs.ts  migrations.ts  codegen.ts  server.ts  language-server.ts
+  errors.ts  types.ts  index.ts
 test/
-  shql.test.ts
-  google.integration.test.ts
+  shql.test.ts  v1.test.ts  xlsx.test.ts  language.test.ts  google.integration.test.ts
 examples/
   database.shql
 ```
 
 The parser is handwritten so the grammar can evolve without a parser-generator runtime. Adapters isolate storage behavior from language semantics.
 
-## Roadmap beyond the v1 candidate
+## Roadmap beyond v1
 
-Likely next steps:
+1. Pushdown planning and streaming for capable connectors.
+2. Dedicated PostgreSQL, MySQL, and SQLite driver packages around `SqlAdapter`.
+3. External coordination for atomic locking where required.
+4. Richer column-level policy evaluation and durable lineage.
 
-1. Add an Apps Script or external coordinator for atomic locking where required.
-2. Publish dedicated PostgreSQL, MySQL, and SQLite driver packages around `SqlAdapter`.
-3. Add a complete language server on top of the bundled TextMate grammar.
-4. Add durable lineage graphs and richer column-level policy evaluation.
-5. Add pushdown planning and streaming for capable connectors.
-
-Language additions should preserve the core rule: a query should be readable from top to bottom and understandable without knowing Google API details.
+Language additions should preserve the core rule: a query should read top to bottom and be understandable without knowing any source's API details.

@@ -131,13 +131,21 @@ export class CsvAdapter implements TableAdapter {
     );
   }
   async inspect(table: TableSchema): Promise<TableInspection> {
-    const rows = await this.rows(table);
+    let headers = table.columns.map((column) => column.name);
+    let rowCount = 0;
+    try {
+      const parsed = parseCsv(await readFile(this.file(table), "utf8"));
+      headers = parsed.shift() ?? [];
+      rowCount = parsed.filter((cells) => cells.some(Boolean)).length;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     return {
       table: table.name,
       tabId: table.tabId,
       title: this.file(table),
-      headers: table.columns.map((column) => column.name),
-      rowCount: rows.length,
+      headers,
+      rowCount,
       inferredColumns: table.columns,
     };
   }

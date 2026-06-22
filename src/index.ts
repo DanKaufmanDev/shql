@@ -14,6 +14,7 @@ export { MemoryAdapter } from "./adapters/memory.ts";
 export { GoogleSheetsAdapter } from "./adapters/google-sheets.ts";
 export { JsonAdapter } from "./adapters/json.ts";
 export { CsvAdapter } from "./adapters/csv.ts";
+export { XlsxAdapter } from "./adapters/xlsx.ts";
 export { HttpAdapter } from "./adapters/http.ts";
 export { SqlAdapter } from "./adapters/sql.ts";
 export type * from "./types.ts";

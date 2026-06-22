@@ -1,6 +1,6 @@
 {
-  "name": "shql",
-  "version": "1.0.0-rc.2",
+  "name": "@shql/core",
+  "version": "1.0.0-rc.3",
   "description": "A data operations language for querying, validating, transforming and syncing company data.",
   "author": {
     "name": "DanKaufmanDev",
@@ -41,6 +41,10 @@
       "types": "./dist/adapters/csv.d.ts",
       "import": "./dist/adapters/csv.js"
     },
+    "./xlsx": {
+      "types": "./dist/adapters/xlsx.d.ts",
+      "import": "./dist/adapters/xlsx.js"
+    },
     "./http": {
       "types": "./dist/adapters/http.d.ts",
       "import": "./dist/adapters/http.js"
@@ -51,8 +55,8 @@
     }
   },
   "bin": {
-    "shql": "./dist/cli.js",
-    "shql-lsp": "./dist/language-server.js"
+    "shql": "dist/cli.js",
+    "shql-lsp": "dist/language-server.js"
   },
   "files": [
     "dist",
@@ -75,18 +79,21 @@
     "prepack": "npm run clean && npm run build"
   },
   "keywords": [
-    "google-sheets",
-    "database",
+    "tabular-data",
     "query-language",
+    "data-language",
+    "dataframe",
     "data-operations",
     "etl",
-    "data-quality"
+    "data-quality",
+    "csv",
+    "google-sheets",
+    "database"
   ],
   "license": "MIT",
   "packageManager": "npm@11.9.0",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

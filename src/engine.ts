@@ -32,6 +32,10 @@ function numeric(value: Scalar, context: string): number {
   return value;
 }
 
+function stringify(value: Scalar): string {
+  return value === null ? "" : value instanceof Date ? value.toISOString() : String(value);
+}
+
 function evaluate(expression: Expression, row: Row, parameters: Parameters, group?: Row[]): Scalar {
   switch (expression.kind) {
     case "literal":
@@ -91,8 +95,19 @@ function evaluate(expression: Expression, row: Row, parameters: Parameters, grou
           invariant(divisor !== 0, "VALIDATION_ERROR", "Division by zero.");
           return numeric(left, "Division") / divisor;
         }
+        case "||":
+          return stringify(left) + stringify(right);
       }
       throw new ShqlError("VALIDATION_ERROR", `Unsupported operator ${expression.operator}.`);
+    }
+    case "in": {
+      const target = evaluate(expression.operand, row, parameters, group);
+      if (target === null) return false;
+      const found = expression.values.some((value) => {
+        const candidate = evaluate(value, row, parameters, group);
+        return candidate !== null && compare(target, candidate) === 0;
+      });
+      return expression.negated ? !found : found;
     }
     case "case":
       for (const branch of expression.branches) {
@@ -155,6 +170,21 @@ function evaluate(expression: Expression, row: Row, parameters: Parameters, grou
         }
         case "COALESCE":
           return args.find((value) => value !== null) ?? null;
+        case "CONCAT":
+          return args.map(stringify).join("");
+        case "TRIM":
+          return String(args[0] ?? "").trim();
+        case "REPLACE":
+          return String(args[0] ?? "")
+            .split(String(args[1] ?? ""))
+            .join(String(args[2] ?? ""));
+        case "ROUND": {
+          if (args[0] === null) return null;
+          const factor = 10 ** (args[1] === null || args[1] === undefined ? 0 : numeric(args[1], "ROUND"));
+          return Math.round(numeric(args[0], "ROUND") * factor) / factor;
+        }
+        case "ABS":
+          return args[0] === null ? null : Math.abs(numeric(args[0], "ABS"));
         case "CONTAINS":
           return String(args[0] ?? "").includes(String(args[1] ?? ""));
         case "STARTS_WITH":
@@ -172,6 +202,8 @@ function hasAggregate(expression: Expression): boolean {
   if (expression.kind === "call")
     return AGGREGATES.has(expression.name) || expression.args.some(hasAggregate);
   if (expression.kind === "binary") return hasAggregate(expression.left) || hasAggregate(expression.right);
+  if (expression.kind === "in")
+    return hasAggregate(expression.operand) || expression.values.some(hasAggregate);
   if (expression.kind === "unary") return hasAggregate(expression.operand);
   if (expression.kind === "case") {
     return (
@@ -505,6 +537,11 @@ export class Engine {
     const aggregate =
       query.groupBy.length > 0 ||
       query.select.some((item) => item.expression !== "*" && hasAggregate(item.expression));
+    invariant(
+      !query.having || aggregate,
+      "VALIDATION_ERROR",
+      "HAVING requires GROUP BY or an aggregate SELECT.",
+    );
     let rows: Row[];
     if (aggregate) {
       for (const item of query.select) {
@@ -534,8 +571,25 @@ export class Engine {
         groups.set(key, group);
       }
       if (query.groupBy.length === 0 && groups.size === 0) groups.set("[]", []);
-      rows = [...groups.values()].map((group) => project(query.select, group[0] ?? {}, parameters, group));
+      const selected = query.having
+        ? [...groups.values()].filter((group) =>
+            Boolean(evaluate(query.having!, group[0] ?? {}, parameters, group)),
+          )
+        : [...groups.values()];
+      rows = selected.map((group) => project(query.select, group[0] ?? {}, parameters, group));
     } else rows = matched.map((item) => project(query.select, item.values, parameters));
+
+    if (query.distinct) {
+      const seen = new Set<string>();
+      rows = rows.filter((row) => {
+        const key = JSON.stringify(row, (_key, value) =>
+          value instanceof Date ? value.toISOString() : value,
+        );
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
 
     for (let index = query.sort.length - 1; index >= 0; index--) {
       const sort = query.sort[index];
@@ -545,6 +599,7 @@ export class Engine {
           (sort.direction === "desc" ? -1 : 1),
       );
     }
+    if (query.skip !== undefined) rows = rows.slice(query.skip);
     if (query.take !== undefined) rows = rows.slice(0, query.take);
     return this.result("select", rows, rows.length);
   }

@@ -7,6 +7,7 @@ export type Expression =
   | { kind: "parameter"; name: string }
   | { kind: "unary"; operator: string; operand: Expression }
   | { kind: "binary"; operator: string; left: Expression; right: Expression }
+  | { kind: "in"; operand: Expression; values: Expression[]; negated: boolean }
   | { kind: "call"; name: string; args: Expression[] }
   | {
       kind: "case";
@@ -35,9 +36,12 @@ interface FromQuery {
 export type Query =
   | (FromQuery & {
       operation: "select";
+      distinct?: boolean;
       groupBy: Expression[];
       select: Projection[];
+      having?: Expression;
       sort: Array<{ expression: Expression; direction: "asc" | "desc" }>;
+      skip?: number;
       take?: number;
     })
   | (FromQuery & {
@@ -132,7 +136,7 @@ function tokenize(source: string): Token[] {
       continue;
     }
     const pair = source.slice(index, index + 2);
-    if (["!=", "<=", ">=", "<>"].includes(pair)) {
+    if (["!=", "<=", ">=", "<>", "||"].includes(pair)) {
       tokens.push({ kind: "symbol", value: pair, position: index });
       index += 2;
       continue;
@@ -154,8 +158,24 @@ class Parser {
   private current(): Token {
     return this.tokens[this.index];
   }
+  private peek(): Token {
+    return this.tokens[this.index + 1] ?? this.tokens[this.index];
+  }
+  private integer(keyword: string): number {
+    const token = this.current();
+    invariant(
+      token.kind === "number" && Number.isInteger(Number(token.value)) && Number(token.value) >= 0,
+      "QUERY_ERROR",
+      `${keyword} requires a non-negative integer.`,
+    );
+    return Number(this.consume().value);
+  }
   private is(value: string): boolean {
-    return this.current().value.toUpperCase() === value.toUpperCase();
+    const token = this.current();
+    // Only bare words (keywords) and symbols are operators/clauses; a string,
+    // number, or parameter literal must never be read as one (e.g. "AND", "-").
+    if (token.kind !== "word" && token.kind !== "symbol") return false;
+    return token.value.toUpperCase() === value.toUpperCase();
   }
   private consume(): Token {
     return this.tokens[this.index++];
@@ -231,7 +251,9 @@ class Parser {
       groupBy.push(...this.expressionList());
     }
     this.expect("SELECT");
+    const distinct = this.match("DISTINCT");
     const select = this.projections();
+    const having = this.match("HAVING") ? this.expression() : undefined;
     const sort: Array<{ expression: Expression; direction: "asc" | "desc" }> = [];
     if (this.match("SORT")) {
       do {
@@ -241,17 +263,16 @@ class Parser {
       } while (this.match(","));
     }
     let take: number | undefined;
-    if (this.match("TAKE")) {
-      const token = this.current();
-      invariant(
-        token.kind === "number" && Number.isInteger(Number(token.value)),
-        "QUERY_ERROR",
-        "TAKE requires a non-negative integer.",
-      );
-      take = Number(this.consume().value);
+    let skip: number | undefined;
+    while (this.is("TAKE") || this.is("SKIP") || this.is("OFFSET")) {
+      if (this.match("TAKE")) take = this.integer("TAKE");
+      else {
+        this.consume();
+        skip = this.integer("SKIP");
+      }
     }
     this.finish();
-    return { ...base, operation: "select", groupBy, select, sort, take };
+    return { ...base, operation: "select", distinct, groupBy, select, having, sort, skip, take };
   }
 
   private parseInsert(): Query {
@@ -330,21 +351,37 @@ class Parser {
       ">=": 3,
       "+": 4,
       "-": 4,
+      "||": 4,
       "*": 5,
       "/": 5,
     };
     while (true) {
+      // Comparison-level postfix operators whose right-hand side is not a plain expression.
+      if (minPrecedence <= 3) {
+        if (this.is("IS")) {
+          this.consume();
+          const operator = this.match("NOT") ? "IS NOT" : "IS";
+          this.expect("NULL");
+          left = { kind: "binary", operator, left, right: { kind: "literal", value: null } };
+          continue;
+        }
+        const negated = this.is("NOT") && this.peek().value.toUpperCase() === "IN";
+        if (negated || this.is("IN")) {
+          if (negated) this.consume();
+          this.expect("IN");
+          this.expect("(");
+          const values = this.is(")") ? [] : this.expressionList();
+          this.expect(")");
+          left = { kind: "in", operand: left, values, negated };
+          continue;
+        }
+      }
       const operator = this.current().value.toUpperCase();
       const level = precedence[operator] ?? -1;
       if (level < minPrecedence) break;
       this.consume();
       const right = this.expression(level + 1);
       left = { kind: "binary", operator, left, right };
-    }
-    if (this.match("IS")) {
-      const operator = this.match("NOT") ? "IS NOT" : "IS";
-      this.expect("NULL");
-      left = { kind: "binary", operator, left, right: { kind: "literal", value: null } };
     }
     return left;
   }

@@ -62,20 +62,20 @@ SHQL requires Node.js 20.11 or newer.
 Install it in a project:
 
 ```bash
-npm install shql
+npm install @shql/core
 ```
 
 Or install the CLI globally:
 
 ```bash
-npm install --global shql
+npm install --global @shql/core
 shql --help
 ```
 
 SHQL is an ESM package and includes TypeScript declarations:
 
 ```ts
-import { connect } from "shql";
+import { connect } from "@shql/core";
 ```
 
 ## Quick start
@@ -124,7 +124,7 @@ Never commit Google credentials or `.env` files.
 ### 4. Connect and query
 
 ```ts
-import { connect } from "shql";
+import { connect } from "@shql/core";
 
 const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
 
@@ -163,14 +163,16 @@ Connections make storage explicit and allow cross-source queries:
 CONNECTION operations FROM GOOGLE-SHEETS ${OPERATIONS_SHEET_ID}
 CONNECTION exports FROM JSON "./data/exports.json"
 CONNECTION imports FROM CSV "./data/imports"
+CONNECTION catalog FROM EXCEL "./data/catalog.xlsx"
 CONNECTION crm FROM HTTP ${CRM_API_URL}
 
 TABLE orders FROM operations.#{ORDERS_TAB_ID} { ... }
 TABLE customers FROM crm.#customers { ... }
 TABLE daily_export FROM exports.#daily { ... }
+TABLE titles FROM catalog.#Sheet1 { ... }
 ```
 
-Built-in adapters cover Google Sheets, JSON, CSV, HTTP, and memory. `SqlAdapter` provides a portable client contract for PostgreSQL, MySQL, and SQLite drivers without forcing a database driver on every SHQL installation.
+Built-in adapters cover Google Sheets, Excel (`.xlsx`), JSON, CSV, HTTP, and memory. `SqlAdapter` provides a portable client contract for PostgreSQL, MySQL, and SQLite drivers without forcing a database driver on every SHQL installation. Like Google Sheets, an Excel workbook is one connection and each worksheet is a table, addressed by its sheet name (`catalog.#Sheet1`); the adapter reads and writes `.xlsx` files directly with no third-party dependency.
 
 ### Typed tables
 
@@ -371,10 +373,10 @@ Parameters are values, not executable source. Missing parameters produce a valid
 FROM customers
 SELECT name, created_at
 SORT created_at DESC, name ASC
-TAKE 50
+TAKE 50 SKIP 100
 ```
 
-`SORT` operates on the projected result. Give computed projections an alias before sorting them.
+`SORT` operates on the projected result. Give computed projections an alias before sorting them. `TAKE` limits the row count and `SKIP` (alias `OFFSET`) discards leading rows; they apply after sorting and may appear in either order. Use `SELECT DISTINCT` to remove duplicate output rows.
 
 ### Literals
 
@@ -397,27 +399,30 @@ Strings accept single or double quotes. A trailing semicolon is optional.
 | Logical    | `OR`, `AND`, unary `NOT`      |
 | Equality   | `=`, `!=`, `<>`               |
 | Ordering   | `<`, `<=`, `>`, `>=`          |
+| Membership | `IN (...)`, `NOT IN (...)`    |
 | Null       | `IS NULL`, `IS NOT NULL`      |
 | Arithmetic | `+`, `-`, `*`, `/`, unary `-` |
+| Text       | `\|\|` (concatenation)        |
 
-Comparisons involving `null` are false except for `IS NULL` and `IS NOT NULL`. Arithmetic requires finite numbers, and division by zero is rejected.
+Comparisons involving `null` are false except for `IS NULL` and `IS NOT NULL`. `IN` with a `null` left side is false, and an empty list matches nothing. Arithmetic requires finite numbers, and division by zero is rejected. `||` (and `CONCAT`) treat `null` as an empty string.
 
 ### Scalar functions
 
-| Function                    | Result               |
-| --------------------------- | -------------------- |
-| `NOW()`                     | Current datetime     |
-| `UPPER(value)`              | Uppercase text       |
-| `LOWER(value)`              | Lowercase text       |
-| `LEN(value)`                | Text length          |
-| `TEXT(value)`               | Convert to text      |
-| `NUMBER(value)`             | Convert to number    |
-| `DATE(value)`               | Convert to date      |
-| `DATETIME(value)`           | Convert to datetime  |
-| `COALESCE(a, b, ...)`       | First non-null value |
-| `CONTAINS(text, part)`      | Substring test       |
-| `STARTS_WITH(text, prefix)` | Prefix test          |
-| `ENDS_WITH(text, suffix)`   | Suffix test          |
+| Function                                | Result                                 |
+| --------------------------------------- | -------------------------------------- |
+| `NOW()`                                 | Current datetime                       |
+| `UPPER(value)` / `LOWER(value)`         | Case conversion                        |
+| `LEN(value)`                            | Text length                            |
+| `TRIM(text)`                            | Trim leading/trailing whitespace       |
+| `REPLACE(text, search, with)`           | Replace all occurrences                |
+| `CONCAT(a, b, ...)`                     | Concatenate values (nulls become `""`) |
+| `CONTAINS(text, part)`                  | Substring test                         |
+| `STARTS_WITH(text, prefix)`             | Prefix test                            |
+| `ENDS_WITH(text, suffix)`               | Suffix test                            |
+| `ROUND(number [, digits])`              | Round to `digits` decimals (default 0) |
+| `ABS(number)`                           | Absolute value                         |
+| `COALESCE(a, b, ...)`                   | First non-null value                   |
+| `TEXT` / `NUMBER` / `DATE` / `DATETIME` | Type conversion                        |
 
 ```shql
 FROM customers
@@ -584,7 +589,7 @@ SHQL updates the unique matching record or inserts a new one. The value object m
 
 ## Language outline
 
-The following is an informal grammar for the public 0.1 syntax:
+The following is an informal grammar for the public v1 syntax:
 
 ```text
 select  := FROM table [AS alias]
@@ -592,9 +597,10 @@ select  := FROM table [AS alias]
            [LET name = expression]...
            [WHERE expression]
            [GROUP BY expression [, expression]...]
-           SELECT projection [, projection]...
+           SELECT [DISTINCT] projection [, projection]...
+           [HAVING expression]
            [SORT expression [ASC | DESC] [, ...]]
-           [TAKE integer]
+           [TAKE integer] [SKIP integer]
 
 insert  := INSERT INTO table object-or-array [RETURNING projection-list]
 
@@ -617,7 +623,7 @@ SHQL's platform APIs turn queries into repeatable company workflows.
 ### Transform, materialize, and sync
 
 ```ts
-import { materialize, sync, transform } from "shql";
+import { materialize, sync, transform } from "@shql/core";
 
 const report = await transform(
   db,
@@ -650,7 +656,7 @@ Plans expose source reads, joins, filters, grouping, sorting, limits, and cost w
 ### Jobs and scheduling
 
 ```ts
-import { JobRunner } from "shql";
+import { JobRunner } from "@shql/core";
 
 const jobs = new JobRunner();
 
@@ -673,7 +679,7 @@ Job history is persisted, retries use backoff, timeouts use abort signals, and m
 ### HTTP server
 
 ```ts
-import { createShqlServer, listen } from "shql";
+import { createShqlServer, listen } from "@shql/core";
 
 const server = createShqlServer(db, {
   token: process.env.SHQL_SERVER_TOKEN,
@@ -690,7 +696,7 @@ The service exposes health, schema, tables, query, explain, and job-run endpoint
 ### Governance and audit logs
 
 ```ts
-import { Governance, JsonlAuditSink, connect } from "shql";
+import { Governance, JsonlAuditSink, connect } from "@shql/core";
 
 const governance = new Governance(
   {
@@ -718,7 +724,7 @@ Authorization is checked before execution. Masked fields are redacted from resul
 ### Migrations, backups, and restoration
 
 ```ts
-import { MigrationRunner, backupTable, restoreTable } from "shql";
+import { MigrationRunner, backupTable, restoreTable } from "@shql/core";
 
 const migrations = new MigrationRunner(db, [
   {
@@ -741,7 +747,7 @@ shql generate types --out src/shql.generated.d.ts
 ```
 
 ```ts
-import { generateTypes, writeTypes } from "shql";
+import { generateTypes, writeTypes } from "@shql/core";
 ```
 
 The generated interfaces reflect table names, field types, and nullability.
@@ -809,7 +815,7 @@ await db.doctor();
 ### In-memory testing
 
 ```ts
-import { connect, MemoryAdapter, parseSchema } from "shql";
+import { connect, MemoryAdapter, parseSchema } from "@shql/core";
 
 const schema = parseSchema(
   `
@@ -896,7 +902,7 @@ SHQL currently fetches a whole tab before filtering. Thousands to low tens of th
 Expected failures use `ShqlError`:
 
 ```ts
-import { ShqlError } from "shql";
+import { ShqlError } from "@shql/core";
 
 try {
   await db.query(query, parameters);

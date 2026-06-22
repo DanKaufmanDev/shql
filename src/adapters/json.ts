@@ -101,11 +101,19 @@ export class JsonAdapter implements TableAdapter {
 
   async inspect(table: TableSchema): Promise<TableInspection> {
     const rows = this.rows(await this.store(table), table);
+    const expected = table.columns.map((column) => column.name);
+    // JSON records are key-value, so report expected order when the actual keys
+    // are a permutation of the schema, and the literal keys when they drift.
+    const actual = rows.length ? Object.keys(rows[0]) : expected;
+    const headers =
+      actual.length === expected.length && expected.every((name) => actual.includes(name))
+        ? expected
+        : actual;
     return {
       table: table.name,
       tabId: table.tabId,
       title: this.file(table),
-      headers: table.columns.map((column) => column.name),
+      headers,
       rowCount: rows.length,
       inferredColumns: table.columns,
     };

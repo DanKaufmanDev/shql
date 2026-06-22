@@ -28,6 +28,7 @@ export type ConnectionProvider =
   | "memory"
   | "json"
   | "csv"
+  | "excel"
   | "http"
   | "postgres"
   | "mysql"

@@ -8,6 +8,7 @@ import type { Governance, GovernanceContext } from "./governance.ts";
 import { GoogleSheetsAdapter } from "./adapters/google-sheets.ts";
 import { JsonAdapter } from "./adapters/json.ts";
 import { CsvAdapter } from "./adapters/csv.ts";
+import { XlsxAdapter } from "./adapters/xlsx.ts";
 import { MemoryAdapter } from "./adapters/memory.ts";
 import { HttpAdapter } from "./adapters/http.ts";
 import type {
@@ -231,6 +232,10 @@ export async function connect(options: ConnectOptions): Promise<ShqlDatabase> {
     }
     if (connection.provider === "csv") {
       adapters.set(connection.name, new CsvAdapter(connection.source));
+      continue;
+    }
+    if (connection.provider === "excel") {
+      adapters.set(connection.name, new XlsxAdapter(connection.source));
       continue;
     }
     if (connection.provider === "memory") {
