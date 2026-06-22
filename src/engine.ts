@@ -214,6 +214,38 @@ function hasAggregate(expression: Expression): boolean {
   return false;
 }
 
+function ungroupedFields(expression: Expression, groupBy: Expression[]): string[] {
+  if (groupBy.some((group) => JSON.stringify(group) === JSON.stringify(expression))) return [];
+  switch (expression.kind) {
+    case "field":
+      return expression.name === "*" ? [] : [expression.name];
+    case "literal":
+    case "parameter":
+      return [];
+    case "unary":
+      return ungroupedFields(expression.operand, groupBy);
+    case "binary":
+      return [...ungroupedFields(expression.left, groupBy), ...ungroupedFields(expression.right, groupBy)];
+    case "in":
+      return [
+        ...ungroupedFields(expression.operand, groupBy),
+        ...expression.values.flatMap((value) => ungroupedFields(value, groupBy)),
+      ];
+    case "call":
+      return AGGREGATES.has(expression.name)
+        ? []
+        : expression.args.flatMap((argument) => ungroupedFields(argument, groupBy));
+    case "case":
+      return [
+        ...expression.branches.flatMap((branch) => [
+          ...ungroupedFields(branch.when, groupBy),
+          ...ungroupedFields(branch.then, groupBy),
+        ]),
+        ...ungroupedFields(expression.otherwise, groupBy),
+      ];
+  }
+}
+
 function qualified(values: Row, table: string, alias?: string): Row {
   const result: Row = { ...values };
   for (const [name, value] of Object.entries(values)) {
@@ -542,6 +574,14 @@ export class Engine {
       "VALIDATION_ERROR",
       "HAVING requires GROUP BY or an aggregate SELECT.",
     );
+    if (query.having) {
+      const fields = [...new Set(ungroupedFields(query.having, query.groupBy))];
+      invariant(
+        fields.length === 0,
+        "VALIDATION_ERROR",
+        `HAVING fields must appear in GROUP BY or be used inside an aggregate: ${fields.join(", ")}.`,
+      );
+    }
     let rows: Row[];
     if (aggregate) {
       for (const item of query.select) {

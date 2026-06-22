@@ -1,6 +1,6 @@
 {
   "name": "@shql/core",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "description": "A data operations language for querying, validating, transforming and syncing company data.",
   "author": {
     "name": "DanKaufmanDev",
@@ -93,8 +93,7 @@
   "license": "MIT",
   "packageManager": "npm@11.9.0",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

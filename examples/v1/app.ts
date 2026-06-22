@@ -1,4 +1,4 @@
-import { connect, materialize } from "shql";
+import { connect, materialize } from "@shql/core";
 
 const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
 

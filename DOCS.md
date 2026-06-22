@@ -224,8 +224,10 @@ Notes and limits:
 
 - No third-party dependency — the OOXML package is read and written with Node's built-in `zlib`.
 - Sheet names used as `tabId` must not contain spaces.
-- On mutation, the target worksheet is rewritten (inline strings, ISO-8601 dates). Other worksheets and shared strings are preserved, but cell formatting, formulas, and charts on the rewritten sheet are not.
-- Externally produced workbooks that store dates as serial numbers are decoded to dates when the column type is `date` or `datetime`.
+- On mutation, the target worksheet is rewritten (inline strings, ISO-8601 dates). Other worksheets and shared strings are preserved. By default, SHQL refuses to rewrite a worksheet containing formulas, styles, charts, drawings, validation, merged cells, or other presentation features it cannot preserve.
+- Destructive rewrites require an explicit per-connection opt-in after creating a backup: `connections: { catalog: { allowDestructiveXlsxWrites: true } }`.
+- Externally produced workbooks that store dates as serial numbers are decoded using the workbook's 1900 or 1904 date system when the column type is `date` or `datetime`.
+- Archives are checked for supported compression, valid bounds, CRC integrity, duplicate parts, and bounded compressed/expanded sizes before XML is parsed.
 - ZIP64 workbooks (more than 65,535 parts) are not supported.
 
 ### CSV and JSON

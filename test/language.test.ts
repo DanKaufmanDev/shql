@@ -73,6 +73,10 @@ test("HAVING filters aggregated groups", async () => {
     ],
   );
   await assert.rejects(db.query(`FROM items SELECT name HAVING price > 1`), /HAVING requires/);
+  await assert.rejects(
+    db.query(`FROM items GROUP BY category SELECT category, COUNT(*) AS n HAVING price > 1`),
+    /HAVING fields must appear in GROUP BY.*price/,
+  );
 });
 
 test("string concatenation and scalar functions", async () => {

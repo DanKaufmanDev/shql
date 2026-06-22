@@ -105,6 +105,7 @@ export interface ConnectOptions {
       auth?: GoogleSheetsAuth;
       fetch?: typeof globalThis.fetch;
       headers?: Record<string, string>;
+      allowDestructiveXlsxWrites?: boolean;
     }
   >;
   governance?: Governance;

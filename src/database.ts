@@ -235,7 +235,12 @@ export async function connect(options: ConnectOptions): Promise<ShqlDatabase> {
       continue;
     }
     if (connection.provider === "excel") {
-      adapters.set(connection.name, new XlsxAdapter(connection.source));
+      adapters.set(
+        connection.name,
+        new XlsxAdapter(connection.source, {
+          allowDestructiveWrites: configured?.allowDestructiveXlsxWrites,
+        }),
+      );
       continue;
     }
     if (connection.provider === "memory") {

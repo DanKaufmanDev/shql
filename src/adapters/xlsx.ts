@@ -18,6 +18,12 @@ import type {
 // provides the DEFLATE codec, so no third-party dependency is required.
 // ---------------------------------------------------------------------------
 
+const MAX_XLSX_BYTES = 128 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 10_000;
+const MAX_ZIP_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_ZIP_EXPANDED_BYTES = 256 * 1024 * 1024;
+const MAX_EOCD_SEARCH = 22 + 0xffff;
+
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -36,9 +42,14 @@ function crc32(buffer: Buffer): number {
 }
 
 function unzip(buffer: Buffer): Map<string, Buffer> {
+  invariant(
+    buffer.length >= 22 && buffer.length <= MAX_XLSX_BYTES,
+    "ADAPTER_ERROR",
+    `Invalid .xlsx file: archive size must be between 22 bytes and ${MAX_XLSX_BYTES} bytes.`,
+  );
   const entries = new Map<string, Buffer>();
   let eocd = -1;
-  for (let index = buffer.length - 22; index >= 0; index--) {
+  for (let index = buffer.length - 22; index >= Math.max(0, buffer.length - MAX_EOCD_SEARCH); index--) {
     if (buffer.readUInt32LE(index) === 0x06054b50) {
       eocd = index;
       break;
@@ -46,27 +57,87 @@ function unzip(buffer: Buffer): Map<string, Buffer> {
   }
   invariant(eocd >= 0, "ADAPTER_ERROR", "Invalid .xlsx file: missing ZIP end-of-central-directory record.");
   const count = buffer.readUInt16LE(eocd + 10);
-  invariant(count !== 0xffff, "ADAPTER_ERROR", "ZIP64 .xlsx files are not supported.");
+  invariant(
+    count !== 0xffff && count <= MAX_ZIP_ENTRIES,
+    "ADAPTER_ERROR",
+    `ZIP64 files and archives with more than ${MAX_ZIP_ENTRIES} entries are not supported.`,
+  );
+  const centralSize = buffer.readUInt32LE(eocd + 12);
   let offset = buffer.readUInt32LE(eocd + 16);
+  invariant(
+    offset + centralSize <= eocd && offset <= buffer.length,
+    "ADAPTER_ERROR",
+    "Invalid .xlsx file: central directory is out of bounds.",
+  );
+  let expandedBytes = 0;
   for (let n = 0; n < count; n++) {
     invariant(
-      buffer.readUInt32LE(offset) === 0x02014b50,
+      offset + 46 <= buffer.length && buffer.readUInt32LE(offset) === 0x02014b50,
       "ADAPTER_ERROR",
       "Invalid .xlsx file: corrupt ZIP central directory.",
     );
+    const flags = buffer.readUInt16LE(offset + 8);
     const method = buffer.readUInt16LE(offset + 10);
+    const expectedCrc = buffer.readUInt32LE(offset + 16);
     const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
     const nameLength = buffer.readUInt16LE(offset + 28);
     const extraLength = buffer.readUInt16LE(offset + 30);
     const commentLength = buffer.readUInt16LE(offset + 32);
     const localOffset = buffer.readUInt32LE(offset + 42);
+    const centralEnd = offset + 46 + nameLength + extraLength + commentLength;
+    invariant(centralEnd <= buffer.length, "ADAPTER_ERROR", "Invalid .xlsx file: truncated ZIP entry.");
+    invariant((flags & 1) === 0, "ADAPTER_ERROR", "Encrypted .xlsx ZIP entries are not supported.");
+    invariant(
+      method === 0 || method === 8,
+      "ADAPTER_ERROR",
+      `Unsupported .xlsx ZIP compression method ${method}.`,
+    );
+    invariant(
+      compressedSize <= MAX_ZIP_ENTRY_BYTES && uncompressedSize <= MAX_ZIP_ENTRY_BYTES,
+      "ADAPTER_ERROR",
+      `An .xlsx ZIP entry exceeds the ${MAX_ZIP_ENTRY_BYTES}-byte limit.`,
+    );
     const name = buffer.toString("utf8", offset + 46, offset + 46 + nameLength);
+    invariant(
+      name.length > 0 && !entries.has(name),
+      "ADAPTER_ERROR",
+      "Invalid .xlsx file: empty or duplicate ZIP entry name.",
+    );
+    invariant(
+      localOffset + 30 <= buffer.length && buffer.readUInt32LE(localOffset) === 0x04034b50,
+      "ADAPTER_ERROR",
+      "Invalid .xlsx file: corrupt local ZIP header.",
+    );
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    invariant(
+      dataStart <= buffer.length && compressedSize <= buffer.length - dataStart,
+      "ADAPTER_ERROR",
+      "Invalid .xlsx file: ZIP entry data is out of bounds.",
+    );
     const raw = buffer.subarray(dataStart, dataStart + compressedSize);
-    entries.set(name, method === 0 ? Buffer.from(raw) : inflateRawSync(raw));
-    offset += 46 + nameLength + extraLength + commentLength;
+    const content =
+      method === 0 ? Buffer.from(raw) : inflateRawSync(raw, { maxOutputLength: MAX_ZIP_ENTRY_BYTES });
+    invariant(
+      content.length === uncompressedSize,
+      "ADAPTER_ERROR",
+      `Invalid .xlsx file: ZIP size mismatch for ${name}.`,
+    );
+    invariant(
+      crc32(content) === expectedCrc,
+      "ADAPTER_ERROR",
+      `Invalid .xlsx file: CRC mismatch for ${name}.`,
+    );
+    expandedBytes += content.length;
+    invariant(
+      expandedBytes <= MAX_ZIP_EXPANDED_BYTES,
+      "ADAPTER_ERROR",
+      `Expanded .xlsx content exceeds the ${MAX_ZIP_EXPANDED_BYTES}-byte limit.`,
+    );
+    entries.set(name, content);
+    offset = centralEnd;
   }
   return entries;
 }
@@ -166,9 +237,10 @@ function columnLetter(index: number): string {
 
 // Excel stores dates as a serial number of days since 1899-12-30 (the epoch is
 // shifted to absorb Excel's fictional 1900 leap day).
-const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
-function excelSerialToDate(serial: number): Date {
-  return new Date(EXCEL_EPOCH + Math.round(serial * 86400000));
+const EXCEL_1900_EPOCH = Date.UTC(1899, 11, 30);
+const EXCEL_1904_EPOCH = Date.UTC(1904, 0, 1);
+function excelSerialToDate(serial: number, date1904: boolean): Date {
+  return new Date((date1904 ? EXCEL_1904_EPOCH : EXCEL_1900_EPOCH) + Math.round(serial * 86400000));
 }
 
 function extractText(fragment: string): string {
@@ -210,12 +282,12 @@ function parseSheet(xml: string, sharedStrings: string[]): Scalar[][] {
   return grid;
 }
 
-function decodeCell(value: Scalar | undefined, type: ColumnType): Scalar {
+function decodeCell(value: Scalar | undefined, type: ColumnType, date1904: boolean): Scalar {
   if (value === undefined || value === null || value === "") return null;
   if (type === "number") return typeof value === "number" ? value : Number(value);
   if (type === "boolean") return typeof value === "boolean" ? value : String(value).toLowerCase() === "true";
   if (type === "date" || type === "datetime")
-    return typeof value === "number" ? excelSerialToDate(value) : new Date(String(value));
+    return typeof value === "number" ? excelSerialToDate(value, date1904) : new Date(String(value));
   return String(value);
 }
 
@@ -272,6 +344,41 @@ interface Workbook {
   entries: Map<string, Buffer>;
   sheets: Map<string, string>;
   sharedStrings: string[];
+  date1904: boolean;
+}
+
+export interface XlsxAdapterOptions {
+  /**
+   * Permit rewriting worksheets that contain formulas, styles, drawings, or
+   * other presentation features SHQL cannot preserve. Disabled by default.
+   */
+  allowDestructiveWrites?: boolean;
+}
+
+function destructiveFeatures(workbook: Workbook, path: string): string[] {
+  const xml = workbook.entries.get(path)?.toString("utf8") ?? "";
+  const features = new Set<string>();
+  const patterns: Array<[string, RegExp]> = [
+    ["formulas", /<f(?:\s|>)/],
+    ["cell styles", /<c\b[^>]*\bs="\d+"/],
+    ["row formatting", /<row\b[^>]*\b(?:s|customFormat|customHeight|ht)="/],
+    ["column formatting", /<cols(?:\s|>)/],
+    ["merged cells", /<mergeCells(?:\s|>)/],
+    ["conditional formatting", /<conditionalFormatting(?:\s|>)/],
+    ["data validation", /<dataValidations(?:\s|>)/],
+    ["hyperlinks", /<hyperlinks(?:\s|>)/],
+    ["drawings or charts", /<(?:drawing|legacyDrawing)(?:\s|>)/],
+    ["tables", /<tableParts(?:\s|>)/],
+    ["filters", /<autoFilter(?:\s|>)/],
+    ["sheet protection", /<sheetProtection(?:\s|>)/],
+    ["print or page settings", /<(?:pageMargins|pageSetup|headerFooter)(?:\s|>)/],
+    ["extensions", /<extLst(?:\s|>)/],
+  ];
+  for (const [name, pattern] of patterns) if (pattern.test(xml)) features.add(name);
+  const file = path.split("/").pop();
+  const relationships = file ? `xl/worksheets/_rels/${file}.rels` : "";
+  if (relationships && workbook.entries.has(relationships)) features.add("worksheet relationships");
+  return [...features];
 }
 
 function freshWorkbook(sheetName: string): Workbook {
@@ -296,7 +403,12 @@ function freshWorkbook(sheetName: string): Workbook {
       "utf8",
     ),
   );
-  return { entries, sheets: new Map([[sheetName, "xl/worksheets/sheet1.xml"]]), sharedStrings: [] };
+  return {
+    entries,
+    sheets: new Map([[sheetName, "xl/worksheets/sheet1.xml"]]),
+    sharedStrings: [],
+    date1904: false,
+  };
 }
 
 // Adds a worksheet to an existing package by splicing new entries into the
@@ -347,8 +459,10 @@ function addSheet(workbook: Workbook, sheetName: string): string {
  */
 export class XlsxAdapter implements TableAdapter {
   private readonly source: string;
-  constructor(source: string) {
+  private readonly options: XlsxAdapterOptions;
+  constructor(source: string, options: XlsxAdapterOptions = {}) {
     this.source = source;
+    this.options = options;
   }
 
   private async load(): Promise<Workbook | null> {
@@ -380,6 +494,7 @@ export class XlsxAdapter implements TableAdapter {
       entries,
       sheets,
       sharedStrings: parseSharedStrings(entries.get("xl/sharedStrings.xml")?.toString("utf8")),
+      date1904: /<workbookPr\b[^>]*\bdate1904="(?:1|true)"/i.test(workbookXml),
     };
   }
 
@@ -391,7 +506,8 @@ export class XlsxAdapter implements TableAdapter {
   }
 
   private async rows(table: TableSchema): Promise<Row[]> {
-    const grid = this.grid(await this.load(), table);
+    const workbook = await this.load();
+    const grid = this.grid(workbook, table);
     const headers = (grid[0] ?? []).map((cell) => (cell === null ? "" : String(cell)));
     const types = new Map(table.columns.map((column) => [column.name, column.type]));
     return grid
@@ -400,7 +516,10 @@ export class XlsxAdapter implements TableAdapter {
       .map(
         (cells) =>
           Object.fromEntries(
-            headers.map((header, index) => [header, decodeCell(cells[index], types.get(header) ?? "text")]),
+            headers.map((header, index) => [
+              header,
+              decodeCell(cells[index], types.get(header) ?? "text", workbook?.date1904 ?? false),
+            ]),
           ) as Row,
       );
   }
@@ -408,7 +527,16 @@ export class XlsxAdapter implements TableAdapter {
   private async save(table: TableSchema, rows: Row[]): Promise<void> {
     const headers = table.columns.map((column) => column.name);
     const workbook = (await this.load()) ?? freshWorkbook(table.tabId);
-    const path = workbook.sheets.get(table.tabId) ?? addSheet(workbook, table.tabId);
+    const existingPath = workbook.sheets.get(table.tabId);
+    if (existingPath && !this.options.allowDestructiveWrites) {
+      const features = destructiveFeatures(workbook, existingPath);
+      invariant(
+        features.length === 0,
+        "ADAPTER_ERROR",
+        `Refusing to rewrite Excel sheet ${table.tabId} because SHQL cannot preserve: ${features.join(", ")}. Set allowDestructiveXlsxWrites only after creating a backup.`,
+      );
+    }
+    const path = existingPath ?? addSheet(workbook, table.tabId);
     workbook.entries.set(path, Buffer.from(buildSheetXml(headers, rows), "utf8"));
     const file = resolve(this.source);
     await mkdir(dirname(file), { recursive: true });

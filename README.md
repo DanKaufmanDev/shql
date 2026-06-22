@@ -172,7 +172,7 @@ TABLE daily_export FROM exports.#daily { ... }
 TABLE titles FROM catalog.#Sheet1 { ... }
 ```
 
-Built-in adapters cover Google Sheets, Excel (`.xlsx`), JSON, CSV, HTTP, and memory. `SqlAdapter` provides a portable client contract for PostgreSQL, MySQL, and SQLite drivers without forcing a database driver on every SHQL installation. Like Google Sheets, an Excel workbook is one connection and each worksheet is a table, addressed by its sheet name (`catalog.#Sheet1`); the adapter reads and writes `.xlsx` files directly with no third-party dependency.
+Built-in adapters cover Google Sheets, Excel (`.xlsx`), JSON, CSV, HTTP, and memory. `SqlAdapter` provides a portable client contract for PostgreSQL, MySQL, and SQLite drivers without forcing a database driver on every SHQL installation. Like Google Sheets, an Excel workbook is one connection and each worksheet is a table, addressed by its sheet name (`catalog.#Sheet1`); the adapter reads and writes `.xlsx` files directly with no third-party dependency. SHQL refuses to rewrite worksheets containing formulas, styles, charts, or other presentation features unless `allowDestructiveXlsxWrites` is explicitly enabled after creating a backup.
 
 ### Typed tables
 
