@@ -98,7 +98,7 @@ function handle(message: RpcMessage): void {
         completionProvider: { triggerCharacters: [".", " "] },
         documentFormattingProvider: false,
       },
-      serverInfo: { name: "shql-language-server", version: "1.0.0-rc.1" },
+      serverInfo: { name: "shql-language-server", version: "1.0.0-rc.2" },
     });
   } else if (message.method === "shutdown") response(message.id, null);
   else if (message.method === "exit") process.exit(0);
