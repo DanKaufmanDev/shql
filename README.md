@@ -1,5 +1,8 @@
 # SHQL
 
+[![npm version](https://img.shields.io/npm/v/@shql/core.svg)](https://www.npmjs.com/package/@shql/core/v/next)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Sheets Query Language** is a data operations language for querying, validating, transforming, syncing, materializing, and governing company data. Google Sheets is its first-class human interface, not its only data source.
 
 A spreadsheet becomes a database, each tab becomes a table, the first row defines its columns, and SHQL provides a small language for reading and safely mutating the records beneath it.
